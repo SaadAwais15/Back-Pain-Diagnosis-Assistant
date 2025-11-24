@@ -1,7 +1,6 @@
 import streamlit as st
 from dataclasses import dataclass
 from typing import Set, Dict
-from queue import PriorityQueue
 
 @dataclass
 class Diagnosis:
@@ -16,48 +15,84 @@ class Diagnosis:
 kb: Dict[str, Diagnosis] = {
     "muscular_strain": Diagnosis(
         name="Muscular Strain",
-        required_symptoms={"localized_back_pain"},
-        optional_symptoms={"pain_with_movement", "muscle_tightness", "improves_with_rest", "stiffness_morning"},
+        required_symptoms={"local back pain"},
+        optional_symptoms={
+            "pain when moving",
+            "muscle tightness",
+            "pain gets better with rest",
+            "morning stiffness"
+        },
         red_flags=set(),
         suggested_tests={"Physical Examination"},
         suggested_treatments={"Rest", "Physiotherapy", "NSAIDs"}
     ),
+
     "disc_herniation": Diagnosis(
         name="Disc Herniation",
-        required_symptoms={"radiating_leg_pain", "pain_shoots_when_cough_or_sneeze", "sharp_burning_back_or_leg_pain"},
-        optional_symptoms={"numbness", "tingling", "leg_weakness", "pain_in_buttocks_or_thigh", "pain_in_foot", "pain_when_lifting_or_twisting", "pain_in_arm_or_shoulder"},
-        red_flags={"bladder_dysfunction", "saddle_anesthesia", "progressive_leg_weakness"},
+        required_symptoms={
+            "radiating pain from back to leg",
+            "pain worse with cough or sneeze",
+            "sharp back or leg pain"
+        },
+        optional_symptoms={
+            "numbness",
+            "tingling",
+            "leg weakness",
+            "buttock or thigh pain",
+            "foot pain",
+            "pain when bending or twisting",
+            "arm or shoulder pain"
+        },
+        red_flags={
+            "trouble controlling bladder",
+            "numbness between legs",
+            "leg weakness"
+        },
         suggested_tests={"MRI", "CT Scan", "Physical Examination"},
         suggested_treatments={"Physical Therapy", "Pain Management", "Surgery if severe"}
     ),
+
     "sciatica": Diagnosis(
-        name="Sciatica / Radiculopathy",
-        required_symptoms={"radiating_leg_pain", "pain_shoots_when_cough_or_sneeze", "numbness", "tingling"},
-        optional_symptoms={"leg_weakness", "urinary_incontinence", "fecal_incontinence", "pain_on_lifting_leg", "leg_pain_below_knee"},
-        red_flags={"urinary_incontinence", "fecal_incontinence"},
+        name="Sciatica / Nerve Compression",
+        required_symptoms={
+            "radiating pain from back to leg",
+            "pain worse with cough or sneeze",
+            "numbness",
+            "tingling"
+        },
+        optional_symptoms={
+            "leg weakness",
+            "loss of bladder control",
+            "loss of bowel control",
+            "pain when raising leg",
+            "pain below knee"
+        },
+        red_flags={
+            "loss of bladder control",
+            "loss of bowel control"
+        },
         suggested_tests={"MRI", "X-Ray", "Nerve Conduction Study"},
-        suggested_treatments={"NSAIDs", "Physical Therapy", "Epidural Steroid Injection", "Surgery if severe"}
+        suggested_treatments={
+            "NSAIDs",
+            "Physical Therapy",
+            "Epidural Steroid Injection",
+            "Surgery if severe"
+        }
     )
 }
 
 # ------------------ Session State Init ------------------
 if "provided" not in st.session_state:
     st.session_state.provided = set()
-if "asked" not in st.session_state:
-    st.session_state.asked = set()
-if "finished" not in st.session_state:
-    st.session_state.finished = False
-if "symptom_list" not in st.session_state:
-    st.session_state.symptom_list = []
-if "possible_diags" not in st.session_state:
-    st.session_state.possible_diags = set(kb.keys())
+if "diagnosed" not in st.session_state:
+    st.session_state.diagnosed = False
 
 def build_symptom_list(kb):
     symptoms = set()
     for diag in kb.values():
         symptoms.update(diag.required_symptoms)
         symptoms.update(diag.optional_symptoms)
-    return list(symptoms)
+    return sorted(list(symptoms))
 
 # ------------------ Streamlit UI ------------------
 # Custom CSS for medical-inspired styling
@@ -75,31 +110,21 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #45a049;
     }
-    .no-button {
-        background-color: #f44336 !important;  /* Red for no */
-    }
-    .no-button:hover {
-        background-color: #da190b !important;
-    }
     .title {
         color: #2E86C1;  /* Medical blue */
         font-family: 'Arial', sans-serif;
         text-align: center;
     }
-    .question-box {
-        background-color: #ffffff;
+    .input-box {
+        background-color: transparent;
         border: 2px solid #2E86C1;
         border-radius: 10px;
         padding: 20px;
         margin: 10px 0;
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
-    .question-text {
-        color: black;
-        font-weight: bold;
-    }
     .diagnosis-card {
-        background-color: #ffffff;
+        background-color: transparent;
         border: 2px solid #28B463;
         border-radius: 10px;
         padding: 20px;
@@ -107,103 +132,81 @@ st.markdown("""
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
     .red-flag {
-        background-color: #ffe6e6;
+        background-color: transparent;
         border: 2px solid #E74C3C;
         border-radius: 10px;
         padding: 20px;
         margin: 10px 0;
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
+    .large-text {
+        font-size: 36px;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("<h1 class='title'>🩺 Back Pain Diagnosis Assistant</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #2E86C1;'>Using Best-First Search to guide your diagnosis process 💡</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #2E86C1;'>Enter patient symptoms and get a diagnosis using Best-First Search 💡</p>", unsafe_allow_html=True)
 
-if not st.session_state.finished:
-    if not st.session_state.symptom_list:
-        st.session_state.symptom_list = build_symptom_list(kb)
+symptom_list = build_symptom_list(kb)
 
-    # Update possible diagnoses based on current provided and asked symptoms
-    for diag in list(st.session_state.possible_diags):
-        if any(req in st.session_state.asked and req not in st.session_state.provided for req in kb[diag].required_symptoms):
-            st.session_state.possible_diags.remove(diag)
-
-    # Collect candidate symptoms from possible diagnoses
-    candidate_symptoms = set()
-    for diag in st.session_state.possible_diags:
-        candidate_symptoms.update(kb[diag].required_symptoms | kb[diag].optional_symptoms)
-
-    # Get list of unasked candidate symptoms
-    candidates = [s for s in st.session_state.symptom_list if s not in st.session_state.asked and s in candidate_symptoms]
-
-    if candidates:
-        # Compute heuristic for each candidate: negative count of possible diagnoses that have this symptom (lower heuristic = higher priority)
-        heuristic = {}
-        for symptom in candidates:
-            count = sum(1 for d in st.session_state.possible_diags if symptom in kb[d].required_symptoms or symptom in kb[d].optional_symptoms)
-            heuristic[symptom] = -count  # More negative for symptoms in more diagnoses
-
-        # Use PriorityQueue to select the next symptom (smallest heuristic first)
-        queue = PriorityQueue()
-        for symptom in candidates:
-            queue.put((heuristic[symptom], symptom))
-
-        if not queue.empty():
-            h, symptom = queue.get()
-            st.markdown(f"<div class='question-box'><span class='question-text'>🤔 Does the patient have <strong>'{symptom.replace('_',' ')}'</strong>?</span></div>", unsafe_allow_html=True)
-            col1, col2 = st.columns(2, gap="small")
-            with col1:
-                yes = st.button("✅ Yes", key=f"yes_{symptom}")
-            with col2:
-                no = st.button("❌ No", key=f"no_{symptom}", help="Click if the patient does not have this symptom")
-
-            if yes:
-                st.session_state.provided.add(symptom)
-                st.session_state.asked.add(symptom)
-                st.rerun()
-            elif no:
-                st.session_state.asked.add(symptom)
-                st.rerun()
+if not st.session_state.diagnosed:
+    st.write("**📝 Enter Patient Symptoms:**")
+    st.write("Please select at least 4 symptoms from the list below. Suggestions will appear as you type.")
+    
+    selected_symptoms = st.multiselect(
+        "Select symptoms (type to search and select):",
+        options=symptom_list,
+        default=[],
+        help="Choose from the available symptoms. At least 4 are required for diagnosis."
+    )
+    
+    if len(selected_symptoms) < 4:
+        st.warning("⚠️ Please select at least 4 symptoms to proceed with diagnosis.")
+        diagnose_button = st.button("Diagnose", disabled=True)
     else:
-        st.session_state.finished = True
+        diagnose_button = st.button("🔍 Diagnose")
+    
+    if diagnose_button:
+        st.session_state.provided = set(selected_symptoms)
+        st.session_state.diagnosed = True
+        st.rerun()
 
-if st.session_state.finished:
+if st.session_state.diagnosed:
     st.markdown("<div class='diagnosis-card'>", unsafe_allow_html=True)
-    st.markdown("### 🎉 Diagnosis Complete!")
+    st.write("### <span style='color: red;'>➕</span> Diagnosis Complete!", unsafe_allow_html=True)
     st.write("**🩹 Symptoms provided by patient:**", ", ".join(sorted(st.session_state.provided)) if st.session_state.provided else "None")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # Score final diagnosis (only among possible diagnoses, but since finished, use all or the top)
+    # Score final diagnosis using best-first like scoring (prioritize based on matches)
     scores = {}
-    for key in st.session_state.possible_diags or kb.keys():  # If no possible, fallback to all
-        diag = kb[key]
+    for key, diag in kb.items():
         score = 2 * len(diag.required_symptoms.intersection(st.session_state.provided))
         score += len(diag.optional_symptoms.intersection(st.session_state.provided))
         scores[key] = score
+    
     if scores:
+        # Best-first: select the one with highest score (most matches)
         final_diag_key = max(scores, key=lambda k: scores[k])
         final_diag = kb[final_diag_key]
-        st.write(f"**🏥 Final Diagnosis:** {final_diag.name}")
-    else:
-        st.write("**🏥 Final Diagnosis:** Unable to determine (no matching diagnoses)")
-
-    if scores:
+        
+        st.markdown("<div class='red-flag'>", unsafe_allow_html=True)
+        st.markdown(f"<p class='large-text'>🏥 Final Diagnosis: {final_diag.name}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
         red_flags_detected = st.session_state.provided.intersection(final_diag.red_flags)
         if red_flags_detected:
-            st.markdown("<div class='red-flag'>", unsafe_allow_html=True)
             st.write("***🚨 URGENT MEDICAL ATTENTION ADVISED ***")
             st.write("Red Flag Symptoms Detected:", ", ".join(red_flags_detected))
-            st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.success("✅ No immediate red flags detected.")
 
         st.write("**🧪 Suggested Tests:**", ", ".join(final_diag.suggested_tests))
         st.write("**💊 Suggested Treatments:**", ", ".join(final_diag.suggested_treatments))
-    st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.write("**🏥 Final Diagnosis:** Unable to determine (no matching diagnoses)")
 
     if st.button("🔄 Start New Diagnosis"):
         st.session_state.provided.clear()
-        st.session_state.asked.clear()
-        st.session_state.finished = False
-        st.session_state.symptom_list.clear()
-        st.session_state.possible_diags = set(kb.keys())
+        st.session_state.diagnosed = False
